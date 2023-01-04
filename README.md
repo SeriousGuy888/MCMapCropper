@@ -2,6 +2,8 @@
 
 Made this to automatically crop many exported Minecraft minimaps ([exported from Xaero's World Map mod](https://www.curseforge.com/minecraft/mc-mods/xaeros-world-map)) to the same location.
 
+The input files **don't have to have the same dimensions**. [Template Matching with Python OpenCV](https://docs.opencv.org/5.x/d4/dc6/tutorial_py_template_matching.html) is used to correctly crop the images. I don't know if this is an efficient way to do this, but it does work ¯\\\_(ツ)\_/¯
+
 ## How to Use
 
 1. Add image files into `input` folder. <sub>All image files are in `.png` format.</sub>
