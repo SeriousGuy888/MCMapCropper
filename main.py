@@ -1,7 +1,6 @@
 import os
 import cv2 as cv
 from typing import Tuple
-from matplotlib import pyplot as plt
 from PIL import Image, ImageDraw, ImageFont
 from tqdm import tqdm
 
@@ -35,19 +34,26 @@ def main():
     img = crop_img(img, top_left, bottom_right)
     if ENABLE_INFO_ON_IMAGE:
       img = add_img_info(img, f)
+
+    if not os.path.exists(OUTPUT_DIR):
+      os.mkdir(OUTPUT_DIR)
     img.save(OUTPUT_DIR + f)
   print("Done!")
 
 
 def get_template() -> cv.Mat:
+  """
+  If the default template name exists, read that as the template.
+  Otherwise, prompt the user to choose one of the files from the folder.
+  """
+
   template_name = TEMPLATE_NAME
 
   if not template_name:
     template_options = os.listdir(TEMPLATE_DIR)
-    print(str.join("\n", template_options))
 
     choice = ""
-    input_message = "Pick an option:\n"
+    input_message = "\n\nSelect template image to crop to:\n"
 
     for index, item in enumerate(template_options):
       input_message += f"{index+1}) {item}\n"
@@ -56,14 +62,22 @@ def get_template() -> cv.Mat:
     while choice.lower() not in map(str, range(1, len(template_options) + 1)):
       choice = input(input_message)
     template_name = template_options[int(choice) - 1]
+    print("\n")
 
   template_path = TEMPLATE_DIR + template_name
+
+
   if not os.path.exists(template_path):
     raise FileNotFoundError(f"Template file `{template_path}` not found.")
   return cv.imread(template_path, 0)
 
 
 def add_img_info(img: Image, info_text: str, info_section_height: int = 35) -> Image:
+  """
+  Add a section at the top of the image with space to add some
+  extra text.
+  """
+
   dimensions = (img.width, img.height + info_section_height)
   new_img = Image.new("RGBA", dimensions, "black")
   new_img.paste(img, (0, info_section_height))
@@ -93,13 +107,6 @@ def match_template(full_image_path: str, template: cv.Mat) -> Tuple[Tuple[int, i
 
   top_left = max_loc
   bottom_right = (top_left[0] + w, top_left[1] + h)
-
-  # cv.rectangle(img, top_left, bottom_right, 255, 2)
-  # plt.subplot(121), plt.imshow(res, cmap="gray")
-  # plt.title("Matching Result"), plt.xticks([]), plt.yticks([])
-  # plt.subplot(122), plt.imshow(img, cmap="gray")
-  # plt.title("Detected Point"), plt.xticks([]), plt.yticks([])
-  # plt.show()
 
   return (top_left, bottom_right)
 
