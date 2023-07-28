@@ -15,6 +15,7 @@ TEMPLATE_NAME = ""  # Leave empty to prompt user to specify
 FONT = ImageFont.truetype("./fonts/UbuntuMono-Regular.ttf", 24)
 
 # ENABLE_INFO_ON_IMAGE = False
+ENABLE_DYNAMIC_TEMPLATE = False
 
 
 def main():
@@ -40,7 +41,8 @@ def main():
       os.mkdir(OUTPUT_DIR)
     output_path = OUTPUT_DIR + file_name
     img.save(output_path)
-    template = cv.imread(output_path, 0)
+    if ENABLE_DYNAMIC_TEMPLATE:
+      template = cv.imread(output_path, 0)
 
   print("Done!")
 
