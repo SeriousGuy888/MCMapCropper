@@ -25,6 +25,11 @@ def main():
   template = get_template()
   center_offsets = get_center_offsets()
 
+  # stop if not all the filenames are present in the centers file
+  if len(center_offsets) != len(os.listdir(MAP_DIR)):
+    raise ValueError(
+        "Not all map images have a center offset in the centers file.")
+
   first_crop_rect, first_offset = get_first_position(template)
 
   files = tqdm(os.listdir(MAP_DIR), unit="images")
