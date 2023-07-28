@@ -18,26 +18,30 @@ ENABLE_INFO_ON_IMAGE = False
 
 
 def main():
-  template = get_template()
+  original_template = get_template()
+  template = original_template.copy()
 
   files = tqdm(os.listdir(MAP_DIR), unit="images")
-  for f in files:
-    if not f.endswith(".png"):
+  for file_name in files:
+    if not file_name.endswith(".png"):
       continue
 
-    files.set_description(f"Cropping {f}...")
+    files.set_description(f"Cropping {file_name}...")
 
-    img_path = MAP_DIR + f
+    img_path = MAP_DIR + file_name
     top_left, bottom_right = match_template(img_path, template)
 
     img = Image.open(img_path)
     img = crop_img(img, top_left, bottom_right)
     if ENABLE_INFO_ON_IMAGE:
-      img = add_img_info(img, f)
+      img = add_img_info(img, file_name)
 
     if not os.path.exists(OUTPUT_DIR):
       os.mkdir(OUTPUT_DIR)
-    img.save(OUTPUT_DIR + f)
+    output_path = OUTPUT_DIR + file_name
+    img.save(output_path)
+    template = cv.imread(output_path, 0)
+
   print("Done!")
 
 
