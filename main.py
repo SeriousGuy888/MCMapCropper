@@ -14,7 +14,7 @@ TEMPLATE_NAME = ""  # Leave empty to prompt user to specify
 
 FONT = ImageFont.truetype("./fonts/UbuntuMono-Regular.ttf", 24)
 
-ENABLE_INFO_ON_IMAGE = False
+# ENABLE_INFO_ON_IMAGE = False
 
 
 def main():
@@ -33,8 +33,8 @@ def main():
 
     img = Image.open(img_path)
     img = crop_img(img, top_left, bottom_right)
-    if ENABLE_INFO_ON_IMAGE:
-      img = add_img_info(img, file_name)
+    # if ENABLE_INFO_ON_IMAGE:
+    #   img = add_img_info(img, file_name)
 
     if not os.path.exists(OUTPUT_DIR):
       os.mkdir(OUTPUT_DIR)
@@ -76,20 +76,20 @@ def get_template() -> cv.Mat:
   return cv.imread(template_path, 0)
 
 
-def add_img_info(img: Image, info_text: str, info_section_height: int = 35) -> Image:
-  """
-  Add a section at the top of the image with space to add some
-  extra text.
-  """
+# def add_img_info(img: Image, info_text: str, info_section_height: int = 35) -> Image:
+#   """
+#   Add a section at the top of the image with space to add some
+#   extra text.
+#   """
 
-  dimensions = (img.width, img.height + info_section_height)
-  new_img = Image.new("RGBA", dimensions, "black")
-  new_img.paste(img, (0, info_section_height))
+#   dimensions = (img.width, img.height + info_section_height)
+#   new_img = Image.new("RGBA", dimensions, "black")
+#   new_img.paste(img, (0, info_section_height))
 
-  d = ImageDraw.Draw(new_img)
-  d.text((10, 5), info_text, font=FONT, fill="lightgray")
+#   d = ImageDraw.Draw(new_img)
+#   d.text((10, 5), info_text, font=FONT, fill="lightgray")
 
-  return new_img
+#   return new_img
 
 
 def crop_img(img: Image, top_left: Tuple[int, int], bottom_right: Tuple[int, int]) -> Image:
