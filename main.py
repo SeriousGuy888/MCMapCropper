@@ -11,18 +11,33 @@ OUTPUT_DIR = "./output/"
 
 MAP_DIR = INPUT_DIR + "maps/"
 
-TEMPLATE_DIR = INPUT_DIR + "templates/"
-TEMPLATE_NAME = ""  # Leave empty to prompt user to specify
+TEMPLATES_DIR = INPUT_DIR + "templates/"
+TEMPLATE_IMAGES_DIR = TEMPLATES_DIR + "images/"
+DEFAULT_IMAGE_TEMPLATE_NAME = ""  # Leave empty to prompt user to specify
+
+"""
+This is a path to a JSON file with an array of cropping templates.
+These cropping templates are structured like this:
+{
+  "title": "Template title",
+  "description": "Template description",
+
+  "rect": [x1, y1, x2, y2]  // These are **Minecraft in-game coordinates**, not pixel coordinates
+                            // The coordinates the images are aligned to are determined in `CENTERS_FILE_PATH`
+}
+"""
+CROP_TEMPLATE_PATH = TEMPLATES_DIR + "cropping_templates.json"
 
 CENTERS_FILE_PATH = INPUT_DIR + "centers/image_centers.json"
 
 FONT = ImageFont.truetype("./fonts/UbuntuMono-Regular.ttf", 24)
 
-ENABLE_INFO_ON_IMAGE = True
+# if True, we will add the image name each was cropped from to the top of the output image
+ENABLE_INFO_ON_IMAGE = False
 
 
 def main():
-  template = get_template()
+  template = prompt_for_template()
   center_offsets = get_center_offsets()
 
   # stop if not all the filenames are present in the centers file
@@ -30,7 +45,13 @@ def main():
     raise ValueError(
         "Not all map images have a center offset in the centers file.")
 
-  first_crop_rect, first_offset = get_first_position(template)
+  first_crop_rect, first_offset = None, None
+
+  if type(template) is tuple:
+    first_crop_rect = template
+    first_offset = (0, 0)
+  else:
+    first_crop_rect, first_offset = get_first_position(template)
 
   files = tqdm(os.listdir(MAP_DIR), unit="images")
   for file_name in files:
@@ -92,34 +113,74 @@ def get_center_offsets() -> dict[str, tuple[int, int]]:
     return json.loads(f.read())
 
 
-def get_template() -> cv.Mat:
+def prompt_for_template() -> cv.Mat | tuple[tuple[int, int], tuple[int, int]]:
   """
   If the default template name exists, read that as the template.
   Otherwise, prompt the user to choose one of the files from the folder.
   """
 
-  template_name = TEMPLATE_NAME
+  # ask user if they want to use an image template or use the json file
+  # with minecraft coordinates
 
-  if not template_name:
-    template_options = os.listdir(TEMPLATE_DIR)
+  should_use_img_templates = 1 == prompt_select_from_list(
+      message="Do you want to",
+      options=[
+          "use the JSON file with preset Minecraft coordinates (more reliable), or",
+          "use an image template to crop to (will use template matching to find where the image is the map)?"
+      ])
 
-    choice = ""
-    input_message = "\n\nSelect template image to crop to:\n"
+  if should_use_img_templates:
+    template_name = DEFAULT_IMAGE_TEMPLATE_NAME
 
-    for index, item in enumerate(template_options):
-      input_message += f"{index+1}) {item}\n"
-    input_message += "Enter number: "
+    if not template_name:
+      file_list = os.listdir(TEMPLATE_IMAGES_DIR)
+      template_idx = prompt_select_from_list(
+          file_list, "Select template image to crop to: ")
+      template_name = file_list[template_idx]
 
-    while choice.lower() not in map(str, range(1, len(template_options) + 1)):
-      choice = input(input_message)
-    template_name = template_options[int(choice) - 1]
-    print("\n")
+    template_path = TEMPLATE_IMAGES_DIR + template_name
 
-  template_path = TEMPLATE_DIR + template_name
+    if not os.path.exists(template_path):
+      raise FileNotFoundError(f"Template file `{template_path}` not found.")
+    return cv.imread(template_path, 0)
+  else:
+    # read the json file with cropping templates
 
-  if not os.path.exists(template_path):
-    raise FileNotFoundError(f"Template file `{template_path}` not found.")
-  return cv.imread(template_path, 0)
+    if not os.path.exists(CROP_TEMPLATE_PATH):
+      raise FileNotFoundError(
+          f"Template file `{CROP_TEMPLATE_PATH}` not found.")
+
+    templates_data = None
+    with open(CROP_TEMPLATE_PATH, "r") as f:
+      templates_data = json.loads(f.read())
+
+    options = [
+f"""  {x['title']} - {x['rect']}
+          {x['description']}
+""" for x in templates_data]
+
+    template_idx = prompt_select_from_list(options, "Select crop template: ")
+    x1, y1, x2, y2 = templates_data[template_idx]["rect"]
+    return ((x1, y1), (x2, y2))
+
+
+def prompt_select_from_list(options: list[str], message: str = "Select:") -> int:
+  if not options:
+    raise ValueError("No options provided.")
+
+  inp = ""
+  prompt_msg = f"\n\n{message}\n"
+
+  for index, item in enumerate(options):
+    prompt_msg += f"[{index+1}] {item}\n"
+  prompt_msg += "\nInput selection number: "
+
+  while inp.lower() not in map(str, range(1, len(options) + 1)):
+    inp = input(prompt_msg)
+  selection_idx = int(inp) - 1
+  print("\n")
+
+  return selection_idx
 
 
 def add_img_info(img: Image, info_text: str, info_section_height: int = 35) -> Image:
