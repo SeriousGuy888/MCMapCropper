@@ -1,8 +1,10 @@
+import json
 import os
 import cv2 as cv
-from typing import Tuple
 from PIL import Image, ImageDraw, ImageFont
 from tqdm import tqdm
+
+from match_template import match_template
 
 INPUT_DIR = "./input/"
 OUTPUT_DIR = "./output/"
@@ -12,15 +14,18 @@ MAP_DIR = INPUT_DIR + "maps/"
 TEMPLATE_DIR = INPUT_DIR + "templates/"
 TEMPLATE_NAME = ""  # Leave empty to prompt user to specify
 
+CENTERS_FILE_PATH = INPUT_DIR + "centers/image_centers.json"
+
 FONT = ImageFont.truetype("./fonts/UbuntuMono-Regular.ttf", 24)
 
 # ENABLE_INFO_ON_IMAGE = False
-ENABLE_DYNAMIC_TEMPLATE = False
 
 
 def main():
-  original_template = get_template()
-  template = original_template.copy()
+  template = get_template()
+  center_offsets = get_center_offsets()
+
+  first_crop_rect, first_offset = get_first_position(template)
 
   files = tqdm(os.listdir(MAP_DIR), unit="images")
   for file_name in files:
@@ -29,8 +34,21 @@ def main():
 
     files.set_description(f"Cropping {file_name}...")
 
+    # the zero-zero offset of the current image
+    curr_offset = center_offsets[file_name]
+    net_offset = (  # the offset of this image relative to the first image
+        curr_offset[0] - first_offset[0],
+        curr_offset[1] - first_offset[1]
+    )
+
     img_path = MAP_DIR + file_name
-    top_left, bottom_right = match_template(img_path, template)
+
+    top_left, bottom_right = first_crop_rect
+
+    top_left = (top_left[0] + net_offset[0],
+                top_left[1] + net_offset[1])
+    bottom_right = (bottom_right[0] + net_offset[0],
+                    bottom_right[1] + net_offset[1])
 
     img = Image.open(img_path)
     img = crop_img(img, top_left, bottom_right)
@@ -41,10 +59,32 @@ def main():
       os.mkdir(OUTPUT_DIR)
     output_path = OUTPUT_DIR + file_name
     img.save(output_path)
-    if ENABLE_DYNAMIC_TEMPLATE:
-      template = cv.imread(output_path, 0)
 
   print("Done!")
+
+
+def get_first_position(template: cv.Mat) -> tuple[tuple[tuple[int, int], tuple[int, int]], tuple[int, int]]:
+  first_img_name = os.listdir(MAP_DIR)[0]
+  if not first_img_name.endswith(".png"):
+    raise FileNotFoundError(
+        f"First image `{first_img_name}` is not a PNG file.")
+
+  crop_rectangle = match_template(MAP_DIR + first_img_name, template)
+  zero_zero_offset = get_center_offsets()[first_img_name]
+
+  return (crop_rectangle, zero_zero_offset)
+
+
+def get_center_offsets() -> dict[str, tuple[int, int]]:
+  """
+  Get the dictionary of each image's center coordinates.
+  """
+
+  if not os.path.exists(CENTERS_FILE_PATH):
+    raise FileNotFoundError(f"Centers file `{CENTERS_FILE_PATH}` not found.")
+
+  with open(CENTERS_FILE_PATH, "r") as f:
+    return json.loads(f.read())
 
 
 def get_template() -> cv.Mat:
@@ -72,7 +112,6 @@ def get_template() -> cv.Mat:
 
   template_path = TEMPLATE_DIR + template_name
 
-
   if not os.path.exists(template_path):
     raise FileNotFoundError(f"Template file `{template_path}` not found.")
   return cv.imread(template_path, 0)
@@ -94,27 +133,10 @@ def get_template() -> cv.Mat:
 #   return new_img
 
 
-def crop_img(img: Image, top_left: Tuple[int, int], bottom_right: Tuple[int, int]) -> Image:
+def crop_img(img: Image, top_left: tuple[int, int], bottom_right: tuple[int, int]) -> Image:
   crop_rect = (top_left[0], top_left[1], bottom_right[0], bottom_right[1])
   return img.crop(crop_rect)
 
 
-def match_template(full_image_path: str, template: cv.Mat) -> Tuple[Tuple[int, int], Tuple[int, int]]:
-  """
-  Finds the coordinates where the template image is most likely cropped from on
-  the full image. Returns the top left and bottom right coordinates.
-  https://docs.opencv.org/5.x/d4/dc6/tutorial_py_template_matching.html
-  """
-  img = cv.imread(full_image_path, 0)
-  w, h = template.shape[::-1]
-
-  res = cv.matchTemplate(img, template, cv.TM_CCOEFF)
-  min_val, max_val, min_loc, max_loc = cv.minMaxLoc(res)
-
-  top_left = max_loc
-  bottom_right = (top_left[0] + w, top_left[1] + h)
-
-  return (top_left, bottom_right)
-
-
-main()
+if __name__ == "__main__":
+  main()
