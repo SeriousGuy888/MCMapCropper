@@ -36,9 +36,7 @@ You might find this project useful if you
    This allows all the maps to be aligned on the same grid and also allows for **easy conversion** between *Minecraft in game coordinates* & *image pixel coordinates* later.
    \
    \
-   <sub>
    [Template Matching with Python OpenCV](https://docs.opencv.org/5.x/d4/dc6/tutorial_py_template_matching.html) is used to automatically find how the original image has shifted compared to later images. I don't know if this is an efficient way to do this, but it does seem to work pretty reliably ¯\\\_(ツ)\_/¯
-   </sub>
 
    - Run `/tools/create_crop_preset.py` to select a rectangular area for the program to crop to. The script then converts your input (in pixel coords) to Minecraft coords (using the output from the previous step) and generates a preset that you can copy and paste into `/input/origin_offsets.json`.
      - This script will try to open Paint.NET from the default installation location on Windows. You could change this if you don't have it installed or want to find the selection box locations yourself.
