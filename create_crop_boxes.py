@@ -7,13 +7,15 @@ from typing import Literal
 import pygame
 import pathlib
 
+SHIFT_INTERVAL = 200
+
 SCALE_INTERVAL = 1.25
 MIN_SCALE = SCALE_INTERVAL ** -8
 MAX_SCALE = SCALE_INTERVAL ** 8
 
 # INPUT_IMAGE = "input/maps/2022-12-04.png"
-INPUT_IMAGE = "input/maps/2023-04-08.png"
-# INPUT_IMAGE = "input/maps/2023-07-26.png"
+# INPUT_IMAGE = "input/maps/2023-04-08.png"
+INPUT_IMAGE = "input/maps/2023-07-26.png"
 
 ORIGIN_OFFSETS_PATH = "input/centers/image_centers.json"
 
@@ -102,14 +104,6 @@ def setup():
       (1280, 720), pygame.DOUBLEBUF | pygame.HWSURFACE)
   image = pygame.image.load(INPUT_IMAGE).convert()
 
-  pygame.event.set_allowed([
-      pygame.QUIT,
-      pygame.MOUSEWHEEL,
-      pygame.MOUSEBUTTONDOWN,
-      pygame.MOUSEBUTTONUP,
-      pygame.MOUSEMOTION,
-  ])
-
   return screen, image
 
 
@@ -118,12 +112,7 @@ def main_loop(screen: pygame.Surface, image: pygame.Surface):
 
   state = State()
 
-  is_dragging_l = False
-  drag_l_start = (0, 0)
-  drag_l_end = (0, 0)
-  is_dragging_r = False
-  drag_r_start = (0, 0)
-  # drag_r_end = (0, 0)
+  selected_box = [(0, 0), (0, 0)]
 
   # read origin offsets
   origin_offsets = {}
@@ -146,57 +135,54 @@ def main_loop(screen: pygame.Surface, image: pygame.Surface):
           # stop looping if the user has closed the window
           is_running = False
 
-        case pygame.MOUSEWHEEL:
-          state.zoom("in" if event.y > 0 else "out")
+        case pygame.KEYDOWN:
+          if event.key == pygame.K_w:
+            state.pos = (state.pos[0], state.pos[1] - SHIFT_INTERVAL)
+            state.needs_redraw = True
+          if event.key == pygame.K_a:
+            state.pos = (state.pos[0] - SHIFT_INTERVAL, state.pos[1])
+            state.needs_redraw = True
+          if event.key == pygame.K_s:
+            state.pos = (state.pos[0], state.pos[1] + SHIFT_INTERVAL)
+            state.needs_redraw = True
+          if event.key == pygame.K_d:
+            state.pos = (state.pos[0] + SHIFT_INTERVAL, state.pos[1])
+            state.needs_redraw = True
+
+          if event.key == pygame.K_q:
+            state.zoom("out")
+          if event.key == pygame.K_e:
+            state.zoom("in")
+
+        # case pygame.MOUSEWHEEL:
+        #   state.zoom("in" if event.y > 0 else "out")
 
         case pygame.MOUSEBUTTONDOWN:
           if event.button == 1:
-            is_dragging_l = True
-            drag_l_start = state.screen_to_world(*event.pos)
-            drag_l_end = drag_l_start
+            selected_box[0] = state.screen_to_world(*event.pos)
           if event.button == 3:
-            is_dragging_r = True
-            drag_r_start = state.screen_to_world(*event.pos)
+            selected_box[1] = state.screen_to_world(*event.pos)
+          if event.button == 2:
+            selected_box = [(0, 0), (0, 0)]
+          state.needs_redraw = True
 
-        case pygame.MOUSEBUTTONUP:
-          if event.button == 1:
-            is_dragging_l = False
+          pixel_coords = [int(x) for x in [*selected_box[0], *selected_box[1]]]
+          print("Selection box:", pixel_coords)
+          print("Minecraft coords:", [
+                pixel_coords[i] - origin_offsets[image_name][i % 2] for i in range(4)])
 
-            # (x1, y1, x2, y2)
-            pixel_coords = tuple(int(x) for x in (*drag_l_start, *drag_l_end))
-            print("Selection box:", pixel_coords)
-            print("Minecraft coords:", [
-                  pixel_coords[i] - origin_offsets[image_name][i % 2] for i in range(4)])
-
-          if event.button == 3:
-            is_dragging_r = False
-
-        case pygame.MOUSEMOTION:
-          if is_dragging_l:
-            drag_l_end = state.screen_to_world(*event.pos)
-          if is_dragging_r:
-            drag_r_end = state.screen_to_world(*event.pos)
-            # move the image
-            state.pos = (state.pos[0] - (drag_r_end[0] - drag_r_start[0]),
-                         state.pos[1] - (drag_r_end[1] - drag_r_start[1]))
-            drag_r_start = state.screen_to_world(*event.pos)
-            state.needs_redraw = True
 
     # draw image
     if state.needs_redraw:
       state.redraw_img(screen, image)
 
-    # draw selection box
-    if drag_l_start != drag_l_end:
-      pygame.draw.rect(screen, "#000000",
-                       pygame.Rect(state.world_to_screen(*drag_l_start),
-                                   ((drag_l_end[0] - drag_l_start[0]) * state.scale,
-                                   (drag_l_end[1] - drag_l_start[1]) * state.scale)),
-                       3)
-      state.needs_redraw = True
+      updated_rect = pygame.Rect(state.world_to_screen(*selected_box[0]),
+                                 ((selected_box[1][0] - selected_box[0][0]) * state.scale,
+                                  (selected_box[1][1] - selected_box[0][1]) * state.scale))
+      pygame.draw.rect(screen, "#000000", updated_rect, 3)
 
-    # update display
-    pygame.display.flip()
+      # update display
+      pygame.display.flip()
 
     # limit FPS to 60
     clock.tick(30)
