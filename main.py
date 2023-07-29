@@ -1,26 +1,112 @@
+"""
+Using the images in the `MAP_DIR` directory, crop each image to the same area.
+
+This script can either
+- use a template image to crop to (using template matching to find where the
+  image is the map), or
+- use a JSON file with preset Minecraft coordinates to crop to (more reliable).
+
+Template images are just some part of one of the maps cropped to an area and
+saved as an image. The program will do its best to find where that image is in
+each map image, and crop to that area.
+
+The JSON file with preset Minecraft coordinates should contain cropping presets
+that specify a rectangle in Minecraft coordinates. The program will convert
+those coordinates to pixel coordinates and crop to that area.
+- The `tools/create_crop_preset.py` script can be used to create these presets.
+
+The MC-coordinate to pixel-coordinate conversion is done using the offsets in
+the `ORIGIN_OFFSETS_PATH` file.
+- That file can be created using the `tools/align_images_to_coords.py` script.
+"""
+
+import json
 import os
 import cv2 as cv
-from typing import Tuple
 from PIL import Image, ImageDraw, ImageFont
 from tqdm import tqdm
+
+from utils.match_template import match_template
 
 INPUT_DIR = "./input/"
 OUTPUT_DIR = "./output/"
 
 MAP_DIR = INPUT_DIR + "maps/"
 
-TEMPLATE_DIR = INPUT_DIR + "templates/"
-TEMPLATE_NAME = ""  # Leave empty to prompt user to specify
+CROPS_DIR = INPUT_DIR + "crops/"
+TEMPLATE_DIR = CROPS_DIR + "templates/"
+DEFAULT_TEMPLATE_NAME = ""  # Leave empty to prompt user to specify
+
+##################################################
+CROP_PRESETS = CROPS_DIR + "presets.json"
+"""
+This is a path to a JSON file with an array of cropping presets.
+
+The presets are specified as rectangles in Minecraft coordinates, which allows
+each image to be cropped to the same area even when the images are of different
+dimensions.
+
+These cropping templates are structured like this:
+```
+{
+  "title": "Template title",
+  "description": "Template description",
+  "rect": [x1, y1, x2, y2]  // These are **Minecraft in-game coordinates**, not
+                            // pixel coordinates. The coordinates the images are
+                            // aligned to are determined in `CENTERS_FILE_PATH`
+}
+```
+
+This script will, after a user selects a preset, convert the Minecraft coords to
+pixel coordinates and crop the image to that area.
+"""
+##################################################
+
+##################################################
+ORIGIN_OFFSETS_PATH = INPUT_DIR + "origin_offsets.json"
+"""
+This is a path to a file with the pixel coordinates of where zero-zero is (or
+would be) on each map image. These coordinates act as an offset for each image,
+allowing pixel coordinates to be converted to what Minecraft coordinates in game
+that that pixel depicts (or vice versa).
+
+This file is structured like this:
+```
+{
+  "image_name.png": [x, y],
+  ...
+}
+```
+
+- image_name.png is the name of the image file in the `MAP_DIR` directory.
+- [x, y] represents a pixel coordinate in the image.
+  - That pixel coordinate is zero-zero in Minecraft coordinates.
+"""
+##################################################
 
 FONT = ImageFont.truetype("./fonts/UbuntuMono-Regular.ttf", 24)
 
-# ENABLE_INFO_ON_IMAGE = False
-ENABLE_DYNAMIC_TEMPLATE = False
+# if True, we will add the image name each was cropped from to the top of the
+# output image
+ENABLE_INFO_ON_IMAGE = False
 
 
 def main():
-  original_template = get_template()
-  template = original_template.copy()
+  template = prompt_for_template()
+  center_offsets = get_center_offsets()
+
+  # stop if not all the filenames are present in the centers file
+  if len(center_offsets) != len(os.listdir(MAP_DIR)):
+    raise ValueError(
+        "Not all map images have a center offset in the centers file.")
+
+  first_crop_rect, first_offset = None, None
+
+  if type(template) is tuple:
+    first_crop_rect = template
+    first_offset = (0, 0)
+  else:
+    first_crop_rect, first_offset = get_first_position(template)
 
   files = tqdm(os.listdir(MAP_DIR), unit="images")
   for file_name in files:
@@ -29,92 +115,170 @@ def main():
 
     files.set_description(f"Cropping {file_name}...")
 
+    # the zero-zero offset of the current image
+    curr_offset = center_offsets[file_name]
+    net_offset = (  # the offset of this image relative to the first image
+        curr_offset[0] - first_offset[0],
+        curr_offset[1] - first_offset[1]
+    )
+
     img_path = MAP_DIR + file_name
-    top_left, bottom_right = match_template(img_path, template)
+
+    top_left, bottom_right = first_crop_rect
+
+    top_left = (top_left[0] + net_offset[0],
+                top_left[1] + net_offset[1])
+    bottom_right = (bottom_right[0] + net_offset[0],
+                    bottom_right[1] + net_offset[1])
 
     img = Image.open(img_path)
     img = crop_img(img, top_left, bottom_right)
-    # if ENABLE_INFO_ON_IMAGE:
-    #   img = add_img_info(img, file_name)
+    if ENABLE_INFO_ON_IMAGE:
+      img = add_img_info(img, file_name)
 
     if not os.path.exists(OUTPUT_DIR):
       os.mkdir(OUTPUT_DIR)
     output_path = OUTPUT_DIR + file_name
     img.save(output_path)
-    if ENABLE_DYNAMIC_TEMPLATE:
-      template = cv.imread(output_path, 0)
 
   print("Done!")
 
 
-def get_template() -> cv.Mat:
+def get_first_position(template: cv.Mat) -> tuple[tuple[tuple[int, int],
+                                                        tuple[int, int]],
+                                                  tuple[int, int]]:
+  """
+  Take the first image in the `MAP_DIR` directory, then find the position of the
+  template in that image.
+
+  Returns
+  ```
+  tuple(
+    "the rectangle that the template match occupies",
+    "the image's origin offset"
+  )
+  ```
+  """
+
+  first_img_name = os.listdir(MAP_DIR)[0]
+  if not first_img_name.endswith(".png"):
+    raise FileNotFoundError(
+        f"First image `{first_img_name}` is not a PNG file.")
+
+  crop_rectangle = match_template(MAP_DIR + first_img_name, template)
+  zero_zero_offset = get_center_offsets()[first_img_name]
+
+  return (crop_rectangle, zero_zero_offset)
+
+
+def get_center_offsets() -> dict[str, tuple[int, int]]:
+  """
+  Get the dictionary of each image's center coordinates.
+  """
+
+  if not os.path.exists(ORIGIN_OFFSETS_PATH):
+    raise FileNotFoundError(f"Centers file `{ORIGIN_OFFSETS_PATH}` not found.")
+
+  with open(ORIGIN_OFFSETS_PATH, "r") as f:
+    return json.loads(f.read())
+
+
+def prompt_for_template() -> cv.Mat | tuple[tuple[int, int], tuple[int, int]]:
   """
   If the default template name exists, read that as the template.
   Otherwise, prompt the user to choose one of the files from the folder.
   """
 
-  template_name = TEMPLATE_NAME
+  # ask user if they want to use an image template or use the json file
+  # with minecraft coordinates
 
-  if not template_name:
-    template_options = os.listdir(TEMPLATE_DIR)
+  should_use_img_templates = 1 == prompt_select_from_list(
+      message="Do you want to",
+      options=[
+          "use the JSON file with preset Minecraft coordinates (more reliable), or",
+          "use an image template to crop to (will use template matching to find where the image is the map)?"
+      ])
 
-    choice = ""
-    input_message = "\n\nSelect template image to crop to:\n"
+  if should_use_img_templates:
+    template_name = DEFAULT_TEMPLATE_NAME
 
-    for index, item in enumerate(template_options):
-      input_message += f"{index+1}) {item}\n"
-    input_message += "Enter number: "
+    if not template_name:
+      file_list = os.listdir(TEMPLATE_DIR)
+      template_idx = prompt_select_from_list(
+          file_list, "Select template image to crop to: ")
+      template_name = file_list[template_idx]
 
-    while choice.lower() not in map(str, range(1, len(template_options) + 1)):
-      choice = input(input_message)
-    template_name = template_options[int(choice) - 1]
-    print("\n")
+    template_path = TEMPLATE_DIR + template_name
 
-  template_path = TEMPLATE_DIR + template_name
+    if not os.path.exists(template_path):
+      raise FileNotFoundError(f"Template file `{template_path}` not found.")
+    return cv.imread(template_path, 0)
+  else:
+    # read the json file with cropping templates
 
+    if not os.path.exists(CROP_PRESETS):
+      raise FileNotFoundError(
+          f"Template file `{CROP_PRESETS}` not found.")
 
-  if not os.path.exists(template_path):
-    raise FileNotFoundError(f"Template file `{template_path}` not found.")
-  return cv.imread(template_path, 0)
+    templates_data = None
+    with open(CROP_PRESETS, "r") as f:
+      templates_data = json.loads(f.read())
 
+    options = [
+        f"""  {x['title']} - {x['rect']}
+          {x['description']}
+""" for x in templates_data]
 
-# def add_img_info(img: Image, info_text: str, info_section_height: int = 35) -> Image:
-#   """
-#   Add a section at the top of the image with space to add some
-#   extra text.
-#   """
-
-#   dimensions = (img.width, img.height + info_section_height)
-#   new_img = Image.new("RGBA", dimensions, "black")
-#   new_img.paste(img, (0, info_section_height))
-
-#   d = ImageDraw.Draw(new_img)
-#   d.text((10, 5), info_text, font=FONT, fill="lightgray")
-
-#   return new_img
+    template_idx = prompt_select_from_list(options, "Select crop template: ")
+    x1, y1, x2, y2 = templates_data[template_idx]["rect"]
+    return ((x1, y1), (x2, y2))
 
 
-def crop_img(img: Image, top_left: Tuple[int, int], bottom_right: Tuple[int, int]) -> Image:
+def prompt_select_from_list(options: list[str], message: str = "Select:") -> int:
+  """
+  Given a list of options, prompt the user to select one of them.
+  This will return the **index** of the selected option.
+  """
+
+  if not options:
+    raise ValueError("No options provided.")
+
+  inp = ""
+  prompt_msg = f"\n\n{message}\n"
+
+  for index, item in enumerate(options):
+    prompt_msg += f"[{index+1}] {item}\n"
+  prompt_msg += "\nInput selection number: "
+
+  while inp.lower() not in map(str, range(1, len(options) + 1)):
+    inp = input(prompt_msg)
+  selection_idx = int(inp) - 1
+  print("\n")
+
+  return selection_idx
+
+
+def add_img_info(img: Image, info_text: str, section_height: int = 35) -> Image:
+  """
+  Add a section at the top of the image with space to add some extra text.
+  """
+
+  dimensions = (img.width, img.height + section_height)
+  new_img = Image.new("RGBA", dimensions, "black")
+  new_img.paste(img, (0, section_height))
+
+  d = ImageDraw.Draw(new_img)
+  d.text((10, 5), info_text, font=FONT, fill="lightgray")
+
+  return new_img
+
+
+def crop_img(img: Image,
+             top_left: tuple[int, int],
+             bottom_right: tuple[int, int]) -> Image:
   crop_rect = (top_left[0], top_left[1], bottom_right[0], bottom_right[1])
   return img.crop(crop_rect)
 
 
-def match_template(full_image_path: str, template: cv.Mat) -> Tuple[Tuple[int, int], Tuple[int, int]]:
-  """
-  Finds the coordinates where the template image is most likely cropped from on
-  the full image. Returns the top left and bottom right coordinates.
-  https://docs.opencv.org/5.x/d4/dc6/tutorial_py_template_matching.html
-  """
-  img = cv.imread(full_image_path, 0)
-  w, h = template.shape[::-1]
-
-  res = cv.matchTemplate(img, template, cv.TM_CCOEFF)
-  min_val, max_val, min_loc, max_loc = cv.minMaxLoc(res)
-
-  top_left = max_loc
-  bottom_right = (top_left[0] + w, top_left[1] + h)
-
-  return (top_left, bottom_right)
-
-
-main()
+if __name__ == "__main__":
+  main()
