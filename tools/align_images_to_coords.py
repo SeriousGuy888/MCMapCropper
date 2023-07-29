@@ -1,3 +1,15 @@
+"""
+This tool is used to align all the images in the `maps/` directory to the
+same Minecraft coordinate grid.
+
+This is done by using the first image in the directory as a reference point,
+and then using template matching to find where 0,0 is in each subsequent image.
+
+The result is a JSON file with the pixel-coords of the Minecraft world's center
+in each image.
+"""
+
+from utils.match_template import match_template
 import os
 import cv2 as cv
 import json
@@ -9,12 +21,13 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # import locally from utils
-from utils.match_template import match_template
 
 INPUT_DIR = "../input/"
 MAP_DIR = INPUT_DIR + "maps/"
 CENTERS_DIR = INPUT_DIR + "centers/"
 
+##################################################
+ENABLE_SKIP_SAME_DIMENSIONS = True
 """
 if True, we will skip template matching to determine whether the map has been
 offset from the previous, if the dimensions of the curr image are the same
@@ -24,7 +37,7 @@ In other words, this enables an optimisation where if dimensions are same
 between neighbouring images, we assume the map has not moved and reuse the
 offset from the previous image.
 """
-ENABLE_SKIP_SAME_DIMENSIONS = True
+##################################################
 
 
 def main():
@@ -51,6 +64,11 @@ def main():
 
 
 def prompt_for_img_center(first_image_path: str):
+  """
+  Prompt the user to tell us, in pixel coordinates, what pixel in the image
+  depicts the center of the minecraft map, ie: 0,0.
+  """
+
   # select the first image in the directory
   if not first_image_path.endswith(".png"):
     return
@@ -70,6 +88,19 @@ def prompt_for_img_center(first_image_path: str):
 
 
 def align_all_images(center_coords: tuple[int, int], original_template: cv.Mat):
+  """
+  Loop through all images in the directory, and, using the user-inputed origin
+  point on the first image as reference, use template matching to find where the
+  origin point has moved to in each subsequent image.
+
+  Returns a dict of each image's center coordinates.
+  ```py
+  {
+    "image_name.png": (x, y),
+  }
+  ```
+  """
+
   # dictionary of each image's center coordinates
   image_centers: dict[str, tuple[int, int]] = {}
 
@@ -79,11 +110,8 @@ def align_all_images(center_coords: tuple[int, int], original_template: cv.Mat):
   # every time we shift the image, we add the offset to this
   cumulative_offset = (0, 0)
 
-  # the dimensions of the image in the previous iteration
-  prev_iter_dims = None
-
-  # the name of the image in the previous iteration
-  prev_file_name = None
+  prev_iter_dims = None  # dimensions of the image in the previous iteration
+  prev_file_name = None  # name of the image in the previous iteration
 
   # loop through all images in the directory
   file_loop = tqdm(os.listdir(MAP_DIR), unit="files")
@@ -102,8 +130,8 @@ def align_all_images(center_coords: tuple[int, int], original_template: cv.Mat):
     curr_iter_dims = imagesize.get(MAP_DIR + file_name)
 
     # if the dimensions are the same as the previous image AND the optimisation
-    # to skip these cases is enabled, we can skip, reusing the previous iteration's
-    # center coordinates
+    # to skip these cases is enabled, we can skip, reusing the previous
+    # iteration's center coordinates
     if ENABLE_SKIP_SAME_DIMENSIONS and prev_iter_dims == curr_iter_dims:
       image_centers[file_name] = image_centers[prev_file_name]
       file_loop.set_description(f"{file_name}: {image_centers[file_name]}")

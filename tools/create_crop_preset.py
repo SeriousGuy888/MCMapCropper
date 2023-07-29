@@ -1,3 +1,22 @@
+"""
+This tool is used to generate a crop preset that can be put in the
+`crops/presets.json` file to crop to a specific area of the map.
+
+The user will be prompted to select
+- an exported map image (from `input/maps/`) that will be opened in Paint.NET
+- the origin offsets file (from `input/origin_offsets.json`) that will be used
+
+Paint.NET will be opened with a copy of the image, and the user will be prompted
+to enter the x,y,w,h coordinates of the selection box they make in Paint.NET.
+
+The tool will then convert the selection box to Minecraft coordinates and prompt
+the user to enter a title and description for the crop preset.
+
+The tool will then print out the crop preset as JSON.
+
+The user may then copy and paste the JSON into the `crops/presets.json` file.
+"""
+
 import imagesize
 import json
 import logging
@@ -11,8 +30,8 @@ from tkinter import filedialog
 
 
 PAINT_DOT_NET_PATH = "C:/Program Files/paint.net/PaintDotNet.exe"
-MAPS_DIR = "../input/maps/"
-ORIGINS_DIR = "../input/centers/"
+INPUT_DIR = "../input/"
+MAPS_DIR = INPUT_DIR + "/maps/"
 
 
 def main():
@@ -60,22 +79,25 @@ Here is the generated crop preset:
 
 def select_files(root: tk.Tk):
   """
-  Prompts the user to select an exported map image and a centers file (which is
-  a JSON file which contains the pixel locations for zero-zero on each map).
+  Prompts the user to select an exported map image and an origin offsets file
+  (which is a JSON file which contains the pixel locations for zero-zero on each
+  map).
 
   Returns the paths of the selected files.
   """
 
-  input_image_path = filedialog.askopenfilename(filetypes=[("Images", "*.png")],
-                                                initialdir=MAPS_DIR,
-                                                title="Select a map export")
+  input_image_path = filedialog.askopenfilename(
+      filetypes=[("Images", "*.png")],
+      initialdir=MAPS_DIR,
+      title="Select a map export")
   root.update()
   logging.info(f"Selected `{input_image_path}` as map image")
 
-  origin_offsets_path = filedialog.askopenfilename(filetypes=[("JSON", "*.json")],
-                                                   initialdir=ORIGINS_DIR,
-                                                   title="Select a centers file",
-                                                   initialfile="image_centers.json")
+  origin_offsets_path = filedialog.askopenfilename(
+      filetypes=[("JSON", "*.json")],
+      initialdir=INPUT_DIR,
+      title="Select a centers file",
+      initialfile="image_centers.json")
   root.update()
   logging.info(f"Selected `{origin_offsets_path}` as centers file")
 
@@ -84,7 +106,8 @@ def select_files(root: tk.Tk):
 
 def make_temp_copy(original_path: str):
   """
-  Makes a temporary copy of the image at `original_path` and returns the path of the copy.
+  Makes a temporary copy of the image at `original_path` and returns the path of
+  the copy.
   """
 
   temp_dir = tempfile.mkdtemp()
@@ -101,7 +124,10 @@ def open_paint_dot_net(img_path: str):
   Opens the image at `img_path` in Paint.NET.
   """
 
-  print("\nNow opening Paint.NET; make a selection box and type in the coordinates below.\n")
+  print("""
+Now opening Paint.NET.
+Make a selection box and type in the coordinates below.
+""")
 
   try:
     subprocess.Popen([PAINT_DOT_NET_PATH, img_path])
