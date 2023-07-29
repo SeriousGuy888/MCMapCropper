@@ -38,7 +38,7 @@ TEMPLATE_DIR = CROPS_DIR + "templates/"
 DEFAULT_TEMPLATE_NAME = ""  # Leave empty to prompt user to specify
 
 ##################################################
-CROP_PRESETS = CROPS_DIR + "cropping_templates.json"
+CROP_PRESETS = CROPS_DIR + "presets.json"
 """
 This is a path to a JSON file with an array of cropping presets.
 

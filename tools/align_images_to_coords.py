@@ -4,12 +4,13 @@ same Minecraft coordinate grid.
 
 This is done by using the first image in the directory as a reference point,
 and then using template matching to find where 0,0 is in each subsequent image.
+- The user will be prompted to type in the offset for the first image manually.
+  If you are using the example maps, type in `x=512, y=0`.
 
 The result is a JSON file with the pixel-coords of the Minecraft world's center
-in each image.
+in each image. It will be written to `ORIGIN_OFFSETS_PATH`.
 """
 
-from utils.match_template import match_template
 import os
 import cv2 as cv
 import json
@@ -20,11 +21,15 @@ from tqdm import tqdm
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+
 # import locally from utils
 
 INPUT_DIR = "../input/"
 MAP_DIR = INPUT_DIR + "maps/"
-CENTERS_DIR = INPUT_DIR + "centers/"
+ORIGIN_OFFSETS_PATH = INPUT_DIR + "origin_offsets.json"
+
+##################################################
+
 
 ##################################################
 ENABLE_SKIP_SAME_DIMENSIONS = True
@@ -53,14 +58,10 @@ def main():
   image_centers = align_all_images(center_coords, template)
 
   # write this information to a file
-  if not os.path.exists(CENTERS_DIR):
-    os.mkdir(CENTERS_DIR)
-
-  output_path = CENTERS_DIR + "image_centers.json"
-  with open(output_path, "w") as f:
+  with open(ORIGIN_OFFSETS_PATH, "w") as f:
     stringified = json.dumps(image_centers)
     f.write(stringified)
-  print(f"Done! Written to {output_path}.")
+  print(f"Done! Written to {ORIGIN_OFFSETS_PATH}.")
 
 
 def prompt_for_img_center(first_image_path: str):
@@ -100,6 +101,8 @@ def align_all_images(center_coords: tuple[int, int], original_template: cv.Mat):
   }
   ```
   """
+
+  from utils.match_template import match_template
 
   # dictionary of each image's center coordinates
   image_centers: dict[str, tuple[int, int]] = {}
