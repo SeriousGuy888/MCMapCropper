@@ -4,9 +4,14 @@ import json
 import imagesize
 from tqdm import tqdm
 
-from match_template import match_template
+# extend sys.path to include the parent directory
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-INPUT_DIR = "./input/"
+# import locally from utils
+from utils.match_template import match_template
+
+INPUT_DIR = "../input/"
 MAP_DIR = INPUT_DIR + "maps/"
 CENTERS_DIR = INPUT_DIR + "centers/"
 

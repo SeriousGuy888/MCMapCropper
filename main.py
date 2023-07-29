@@ -4,7 +4,7 @@ import cv2 as cv
 from PIL import Image, ImageDraw, ImageFont
 from tqdm import tqdm
 
-from match_template import match_template
+from utils.match_template import match_template
 
 INPUT_DIR = "./input/"
 OUTPUT_DIR = "./output/"
