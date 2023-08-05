@@ -97,6 +97,14 @@ FONT = ImageFont.truetype("./fonts/UbuntuMono-Regular.ttf", 24)
 # output image
 ENABLE_INFO_ON_IMAGE = False
 
+##################################################
+
+# disable PIL decompression bomb warning
+# https://github.com/python-pillow/Pillow/issues/4987
+Image.MAX_IMAGE_PIXELS = None
+
+##################################################
+
 
 @dataclass
 class CropPreset:
