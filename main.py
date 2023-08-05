@@ -20,12 +20,16 @@ the `ORIGIN_OFFSETS_PATH` file.
 - That file can be created using the `tools/align_images_to_coords.py` script.
 """
 
-from dataclasses import dataclass
 import json
 import os
+import pathlib
+import tkinter as tk
+from dataclasses import dataclass
+
 import cv2 as cv
-from PIL import Image, ImageDraw, ImageFont
 import numpy as np
+from PIL import Image, ImageDraw, ImageFont
+from tkinter import filedialog
 from tqdm import tqdm
 
 from utils.match_template import match_template
@@ -101,13 +105,46 @@ class CropPreset:
 
 
 def main():
-  template = prompt_for_template()
-  center_offsets = get_center_offsets()
+  # Hide the tkinter root window
+  root = tk.Tk()
+  root.withdraw()
 
-  # stop if not all the filenames are present in the centers file
-  if len(center_offsets) != len(os.listdir(MAP_DIR)):
+  # Prompt the user for whether they are cropping just one image or if they
+  # are cropping all the images in the `MAP_DIR` directory in bulk.
+
+  # If the user is cropping just one image, prompt them for the image name.
+  # Otherwise, crop all the images in the `MAP_DIR` directory.
+
+  is_bulk_crop = 1 == prompt_select_from_list(
+      message="Do you want to crop just one image, or all the images in the directory?",
+      options=[
+          "Crop just one image",
+          "Crop all the images in the directory"
+      ])
+
+  files = None
+  if is_bulk_crop:
+    files = os.listdir(MAP_DIR)
+  else:
+    file_path = filedialog.askopenfilename(
+        initialdir=MAP_DIR,
+        title="Select image to crop",
+        filetypes=[("PNG files", "*.png")])
+    files = [pathlib.Path(file_path).name]
+
+    print(f"Selected image: {files[0]}")
+
+  origin_offsets = get_origin_offsets()
+
+  # stop if not all the filenames are present in the origins file
+  if is_bulk_crop and len(origin_offsets) != len(os.listdir(MAP_DIR)):
     raise ValueError(
-        "Not all map images have a center offset in the centers file.")
+        "Not all map images have an origin offset in the origins file.")
+  if (not is_bulk_crop) and (files[0] not in origin_offsets):
+    raise ValueError(
+        "The map image does not have an origin offset in the origins file.")
+
+  template = prompt_for_template()
 
   first_crop_rect, first_offset, underlay_path = None, None, None
 
@@ -118,23 +155,9 @@ def main():
   else:
     first_crop_rect, first_offset = get_first_position(template)
 
-  underlay = None
-  if underlay_path:
-    underlay = Image.open(underlay_path)  # Open the underlay image
+  underlay = get_underlay(underlay_path, first_crop_rect)
 
-    # Scale the underlay image to the size of the output rectangle
-    top_left, bottom_right = first_crop_rect
-    underlay = underlay.resize((bottom_right[0] - top_left[0],
-                                bottom_right[1] - top_left[1]),
-                               Image.NEAREST)
-
-    # add a transluscent black overlay to the underlay image
-    underlay = Image.alpha_composite(underlay.convert("RGBA"),
-                                     Image.new("RGBA",
-                                               underlay.size,
-                                               (0, 0, 0, 200)))
-
-  files = tqdm(os.listdir(MAP_DIR), unit="images")
+  files = tqdm(files, unit="image")
   for file_name in files:
     if not file_name.endswith(".png"):
       continue
@@ -142,13 +165,11 @@ def main():
     files.set_description(f"Cropping {file_name}...")
 
     # the zero-zero offset of the current image
-    curr_offset = center_offsets[file_name]
+    curr_offset = origin_offsets[file_name]
     net_offset = (  # the offset of this image relative to the first image
         curr_offset[0] - first_offset[0],
         curr_offset[1] - first_offset[1]
     )
-
-    img_path = MAP_DIR + file_name
 
     top_left, bottom_right = first_crop_rect
 
@@ -157,16 +178,7 @@ def main():
     bottom_right = (bottom_right[0] + net_offset[0],
                     bottom_right[1] + net_offset[1])
 
-    img = Image.open(img_path)
-
-    img = crop_img(img, top_left, bottom_right)
-
-    # If an underlay image was specified, put it under the cropped image
-    if underlay:
-      img = add_underlay(img, underlay)
-
-    if ENABLE_INFO_ON_IMAGE:
-      img = add_img_info(img, file_name)
+    img = execute_crop(file_name, top_left, bottom_right, underlay)
 
     if not os.path.exists(OUTPUT_DIR):
       os.mkdir(OUTPUT_DIR)
@@ -176,7 +188,55 @@ def main():
   print("Done!")
 
 
-def add_underlay(img: Image, underlay: Image) -> Image:
+def execute_crop(img_file_name: str,
+                 top_left: tuple[int, int],
+                 bottom_right: tuple[int, int],
+                 underlay: Image.Image | None) -> Image.Image:
+  """
+  Crop the image to the specified rectangle, and return the cropped image.
+  Also add the underlay image underneath if one was specified.
+  """
+
+  img_path = MAP_DIR + img_file_name
+  img = Image.open(img_path)
+  img = crop_img(img, top_left, bottom_right)
+
+  # If an underlay image was specified, put it under the cropped image
+  if underlay:
+    img = add_underlay(img, underlay)
+  if ENABLE_INFO_ON_IMAGE:
+    img = add_img_info(img, img_file_name)
+
+  return img
+
+
+def get_underlay(underlay_path: str,
+                 first_crop_rect: tuple[tuple[int, int],
+                                        tuple[int, int]]) -> Image.Image | None:
+  if not underlay_path:
+    return None
+
+  try:
+    underlay = Image.open(underlay_path)  # Open the underlay image
+  except FileNotFoundError:
+    raise FileNotFoundError(f"Underlay image `{underlay_path}` not found.")
+
+  # Scale the underlay image to the size of the output rectangle
+  top_left, bottom_right = first_crop_rect
+  underlay = underlay.resize((bottom_right[0] - top_left[0],
+                              bottom_right[1] - top_left[1]),
+                             Image.NEAREST)
+
+  # add a transluscent black overlay to the underlay image
+  underlay = Image.alpha_composite(underlay.convert("RGBA"),
+                                   Image.new("RGBA",
+                                             underlay.size,
+                                             (0, 0, 0, 200)))
+
+  return underlay
+
+
+def add_underlay(img: Image.Image, underlay: Image.Image) -> Image.Image:
   """
   Given the original image and an underlay image, combine the two by placing
   the underlay image underneath the original image, such that any transparent
@@ -192,11 +252,11 @@ def add_underlay(img: Image, underlay: Image) -> Image:
     # add the original image on top of the underlay image
     # https://www.geeksforgeeks.org/python-pil-image-alpha_composite-method/
     img = Image.alpha_composite(underlay.convert("RGBA"), img)
-  
+
   return img
 
 
-def make_black_transparent(img: Image) -> Image:
+def make_black_transparent(img: Image.Image) -> Image.Image:
   """
   Given an image, take each pixel, and if it is #000000, make it transparent.
   https://stackoverflow.com/a/71859851
@@ -245,12 +305,12 @@ def get_first_position(template: cv.Mat) -> tuple[tuple[tuple[int, int],
         f"First image `{first_img_name}` is not a PNG file.")
 
   crop_rectangle = match_template(MAP_DIR + first_img_name, template)
-  zero_zero_offset = get_center_offsets()[first_img_name]
+  zero_zero_offset = get_origin_offsets()[first_img_name]
 
   return (crop_rectangle, zero_zero_offset)
 
 
-def get_center_offsets() -> dict[str, tuple[int, int]]:
+def get_origin_offsets() -> dict[str, tuple[int, int]]:
   """
   Get the dictionary of each image's center coordinates.
   """
@@ -325,7 +385,8 @@ def prompt_for_template() -> cv.Mat | CropPreset:
     )
 
 
-def prompt_select_from_list(options: list[str], message: str = "Select:") -> int:
+def prompt_select_from_list(options: list[str],
+                            message: str = "Select:") -> int:
   """
   Given a list of options, prompt the user to select one of them.
   This will return the **index** of the selected option.
@@ -349,7 +410,9 @@ def prompt_select_from_list(options: list[str], message: str = "Select:") -> int
   return selection_idx
 
 
-def add_img_info(img: Image, info_text: str, section_height: int = 35) -> Image:
+def add_img_info(img: Image.Image,
+                 info_text: str,
+                 section_height: int = 35) -> Image.Image:
   """
   Add a section at the top of the image with space to add some extra text.
   """
@@ -364,9 +427,9 @@ def add_img_info(img: Image, info_text: str, section_height: int = 35) -> Image:
   return new_img
 
 
-def crop_img(img: Image,
+def crop_img(img: Image.Image,
              top_left: tuple[int, int],
-             bottom_right: tuple[int, int]) -> Image:
+             bottom_right: tuple[int, int]) -> Image.Image:
   crop_rect = (top_left[0], top_left[1], bottom_right[0], bottom_right[1])
   return img.crop(crop_rect)
 
