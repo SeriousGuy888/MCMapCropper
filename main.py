@@ -20,10 +20,12 @@ the `ORIGIN_OFFSETS_PATH` file.
 - That file can be created using the `tools/align_images_to_coords.py` script.
 """
 
+from dataclasses import dataclass
 import json
 import os
 import cv2 as cv
 from PIL import Image, ImageDraw, ImageFont
+import numpy as np
 from tqdm import tqdm
 
 from utils.match_template import match_template
@@ -36,6 +38,7 @@ MAP_DIR = INPUT_DIR + "maps/"
 CROPS_DIR = INPUT_DIR + "crops/"
 TEMPLATE_DIR = CROPS_DIR + "templates/"
 DEFAULT_TEMPLATE_NAME = ""  # Leave empty to prompt user to specify
+UNDERLAYS_DIR = INPUT_DIR + "underlays/"
 
 ##################################################
 CROP_PRESETS = CROPS_DIR + "presets.json"
@@ -91,6 +94,12 @@ FONT = ImageFont.truetype("./fonts/UbuntuMono-Regular.ttf", 24)
 ENABLE_INFO_ON_IMAGE = False
 
 
+@dataclass
+class CropPreset:
+  rect: tuple[int, int, int, int]
+  underlay: str | None
+
+
 def main():
   template = prompt_for_template()
   center_offsets = get_center_offsets()
@@ -100,13 +109,30 @@ def main():
     raise ValueError(
         "Not all map images have a center offset in the centers file.")
 
-  first_crop_rect, first_offset = None, None
+  first_crop_rect, first_offset, underlay_path = None, None, None
 
-  if type(template) is tuple:
-    first_crop_rect = template
+  if type(template) is CropPreset:
+    first_crop_rect = template.rect
+    underlay_path = template.underlay
     first_offset = (0, 0)
   else:
     first_crop_rect, first_offset = get_first_position(template)
+
+  underlay = None
+  if underlay_path:
+    underlay = Image.open(underlay_path)  # Open the underlay image
+
+    # Scale the underlay image to the size of the output rectangle
+    top_left, bottom_right = first_crop_rect
+    underlay = underlay.resize((bottom_right[0] - top_left[0],
+                                bottom_right[1] - top_left[1]),
+                               Image.NEAREST)
+
+    # add a transluscent black overlay to the underlay image
+    underlay = Image.alpha_composite(underlay.convert("RGBA"),
+                                     Image.new("RGBA",
+                                               underlay.size,
+                                               (0, 0, 0, 200)))
 
   files = tqdm(os.listdir(MAP_DIR), unit="images")
   for file_name in files:
@@ -132,7 +158,13 @@ def main():
                     bottom_right[1] + net_offset[1])
 
     img = Image.open(img_path)
+
     img = crop_img(img, top_left, bottom_right)
+
+    # If an underlay image was specified, put it under the cropped image
+    if underlay:
+      img = add_underlay(img, underlay)
+
     if ENABLE_INFO_ON_IMAGE:
       img = add_img_info(img, file_name)
 
@@ -142,6 +174,53 @@ def main():
     img.save(output_path)
 
   print("Done!")
+
+
+def add_underlay(img: Image, underlay: Image) -> Image:
+  """
+  Given the original image and an underlay image, combine the two by placing
+  the underlay image underneath the original image, such that any transparent
+  pixels would show the underlay image.
+  """
+
+  # remove black pixels from the original image
+  img = make_black_transparent(img)
+
+  # only add the underlay image if the original image has any transparent
+  # pixels through which the underlay image would be visible.
+  if img.getchannel("A").getbbox():  # if image has any transparent pixels
+    # add the original image on top of the underlay image
+    # https://www.geeksforgeeks.org/python-pil-image-alpha_composite-method/
+    img = Image.alpha_composite(underlay.convert("RGBA"), img)
+  
+  return img
+
+
+def make_black_transparent(img: Image) -> Image:
+  """
+  Given an image, take each pixel, and if it is #000000, make it transparent.
+  https://stackoverflow.com/a/71859851
+  """
+
+  imga = img.convert("RGBA")  # n x m x 4
+
+  imga = np.asarray(imga)
+  r, g, b, a = np.rollaxis(imga, axis=-1)  # split into 4 n x m arrays
+  r_m = r != 0  # binary mask for red channel, True for all non black values
+  g_m = g != 0  # binary mask for green channel, True for all non black values
+  b_m = b != 0  # binary mask for blue channel, True for all non black values
+
+  # combine the three masks using the binary "or" operation
+  # this results in a mask that is True for any pixel that is not black
+  not_black_m = ((r_m == 1) | (g_m == 1) | (b_m == 1))
+
+  # multiply the combined binary mask with the alpha channel
+  a = a * not_black_m
+
+  # stack the img back together
+  imga = Image.fromarray(np.dstack([r, g, b, a]), "RGBA")
+
+  return imga
 
 
 def get_first_position(template: cv.Mat) -> tuple[tuple[tuple[int, int],
@@ -183,7 +262,7 @@ def get_center_offsets() -> dict[str, tuple[int, int]]:
     return json.loads(f.read())
 
 
-def prompt_for_template() -> cv.Mat | tuple[tuple[int, int], tuple[int, int]]:
+def prompt_for_template() -> cv.Mat | CropPreset:
   """
   If the default template name exists, read that as the template.
   Otherwise, prompt the user to choose one of the files from the folder.
@@ -231,7 +310,19 @@ def prompt_for_template() -> cv.Mat | tuple[tuple[int, int], tuple[int, int]]:
 
     template_idx = prompt_select_from_list(options, "Select crop template: ")
     x1, y1, x2, y2 = templates_data[template_idx]["rect"]
-    return ((x1, y1), (x2, y2))
+
+    rect = ((x1, y1), (x2, y2))
+
+    underlay = None
+    try:
+      underlay = UNDERLAYS_DIR + templates_data[template_idx]["underlay"]
+    except KeyError:
+      pass
+
+    return CropPreset(
+        rect=rect,
+        underlay=underlay
+    )
 
 
 def prompt_select_from_list(options: list[str], message: str = "Select:") -> int:
